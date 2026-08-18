@@ -1,13 +1,15 @@
-import os, time, urllib.parse
+import os, time, json
 from flask import Flask, render_template_string, request, redirect
-
 app = Flask(__name__)
 
-BM = {
+DATA = {
     "vendas": [],
-    "caixa_recuperado": 0.0,
-    "caixa_pendente": 0.0,
-    "msg": "Olá, [NOME]! Segue o fechamento da sua compra. Valor: R$ [VALOR]. Chave Pix: CNPJ DA LOJA AQUI."
+    "regras": [
+        {"min": 0.0, "max": 100.0, "desconto": 5.0},
+        {"min": 100.01, "max": 500.0, "desconto": 12.0},
+        {"min": 500.01, "max": 99999.0, "desconto": 20.0}
+    ],
+    "loja": {"nome": "Loja Premium", "cnpj": "00.000.000/0001-00", "pix": "CHAVE PIX"}
 }
 SG = "1965"
 
@@ -17,147 +19,153 @@ H = """<!DOCTYPE html>
     <meta charset="UTF-8">
     <title>Reativa Zap Pro</title>
     <style>
-        * { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',sans-serif; }
-        body { background:#09090A; color:#E1E1E6; display:flex; justify-content:center; align-items:center; min-height:100vh; padding:20px; }
-        .container { background:#121214; width:100%; max-width:450px; border-radius:12px; border:1px solid #29292E; padding:25px; text-align:center; }
-        .logo { font-size:28px; font-weight:800; color:#00B37E; margin-bottom:4px; }
-        .sub { color:#8D8D99; font-size:12px; margin-bottom:20px; }
-        .sel { display:flex; gap:10px; margin-bottom:20px; background:#202024; padding:4px; border-radius:8px; }
-        .bm { flex:1; background:transparent; border:none; color:#8D8D99; padding:8px; font-weight:bold; cursor:pointer; font-size:12px; }
-        .bm.active { background:#00B37E; color:#FFF; border-radius:6px; }
-        .db { display:none; gap:10px; margin-bottom:20px; }
-        .card { flex:1; background:#202024; border:1px solid #323238; border-radius:8px; padding:12px; text-align:left; }
-        .ct { font-size:10px; color:#8D8D99; font-weight:bold; text-transform:uppercase; }
-        .cv { font-size:16px; font-weight:800; }
-        .gr { color: #00B37E; }
-        .rd { color: #FF3333; }
-        .gr-in { margin-bottom:12px; text-align:left; }
-        label { display:block; font-size:11px; color:#E1E1E6; margin-bottom:6px; font-weight:600; }
-        input,textarea { width:100%; background:#202024; border:1px solid #323238; border-radius:6px; padding:10px; color:#FFF; font-size:14px; outline:none; }
-        input:focus,textarea:focus { border-color:#00B37E; }
-        textarea { height:60px; resize:none; font-size:12px; color:#A8A8B3; }
-        .btn { background:#00B37E; color:#FFF; width:100%; border:none; padding:12px; font-size:14px; font-weight:bold; border-radius:6px; cursor:pointer; text-transform:uppercase; }
-        .lista { margin-top:20px; text-align:left; }
-        .lt { font-size:12px; font-weight:bold; color:#FFF; margin-bottom:10px; border-left:3px solid #00B37E; padding-left:6px; }
-        .item { background:#202024; border:1px solid #323238; border-radius:6px; padding:12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; }
-        .item h2 { font-size:14px; color:#FFF; margin-bottom:2px; }
-        .item p { font-size:11px; color:#8D8D99; }
-        .st { font-size:10px; font-weight:bold; padding:2px 6px; border-radius:4px; }
-        .pd { background:#291F12; color:#FBA94C; }
-        .pg { background:#12291B; color:#00B37E; }
+        * { margin:0; padding:0; box-sizing:border-box; font-family:sans-serif; }
+        body { background:#09090A; color:#E1E1E6; display:flex; justify-content:center; padding:20px; }
+        .box { background:#121214; width:100%; max-width:440px; border-radius:10px; border:1px solid #29292E; padding:20px; text-align:center; }
+        .logo { font-size:24px; font-weight:bold; color:#00B37E; }
+        .sel { display:flex; gap:10px; margin:15px 0; background:#202024; padding:4px; border-radius:6px; }
+        .bm { flex:1; background:transparent; border:none; color:#8D8D99; padding:6px; font-weight:bold; cursor:pointer; font-size:12px; }
+        .bm.active { background:#00B37E; color:#FFF; border-radius:4px; }
+        .gr-in { margin-bottom:10px; text-align:left; }
+        label { display:block; font-size:11px; margin-bottom:4px; }
+        input { width:100%; background:#202024; border:1px solid #323238; border-radius:6px; padding:8px; color:#FFF; font-size:14px; outline:none; }
+        .btn { background:#00B37E; color:#FFF; width:100%; border:none; padding:10px; font-weight:bold; border-radius:6px; cursor:pointer; text-transform:uppercase; margin-top:5px; }
+        .s-box { background:#202024; border:1px solid #323238; padding:10px; border-radius:6px; margin-bottom:10px; font-size:12px; }
+        .lista { margin-top:15px; text-align:left; }
+        .lt { font-size:12px; font-weight:bold; margin-bottom:8px; border-left:3px solid #00B37E; padding-left:6px; display:flex; justify-content:space-between; }
+        .busca { width:150px; padding:4px; font-size:11px; background:#202024; border:1px solid #323238; color:#FFF; border-radius:4px; }
+        .item { background:#202024; border:1px solid #323238; border-radius:6px; padding:10px; margin-bottom:6px; font-size:12px; }
         .bt-v { display:flex; gap:6px; margin-top:6px; }
-        .mi { background:#29292E; border:1px solid #323238; color:#FFF; padding:4px 8px; font-size:11px; border-radius:4px; text-decoration:none; font-weight:bold; }
-        .mi.cb { border-color:#00B37E; color:#00B37E; }
-        .mi.bx { border-color:#FF3333; color:#FF3333; }
+        .mi { background:#29292E; border:1px solid #323238; color:#FFF; padding:3px 6px; font-size:11px; border-radius:4px; text-decoration:none; font-weight:bold; cursor:pointer; }
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="box">
         <div class="logo">Reativa Zap Pro 🚀</div>
-        <div class="sub">Auditoria de Caixa e Recuperação</div>
         <div class="sel">
-            <button class="bm active" id="bf" onclick="m('func')">👤 Funcionário</button>
+            <button class="bm active" id="bf" onclick="m('func')">⚡ Vendedor</button>
             <button class="bm" id="bg" onclick="m('ger')">👔 Gerente</button>
         </div>
-        <div class="db" id="pg">
-            <div class="card"><div class="ct">💰 Recuperado</div><div class="cv gr">R$ {{ total_recuperado }}</div></div>
-            <div class="card"><div class="ct">🚨 Na Rua</div><div class="cv rd">R$ {{ total_pendente }}</div></div>
-        </div>
-        <form action="/salvar" method="POST">
-            <input type="hidden" name="criado_por" id="icp" value="Funcionário">
-            <div class="gr-in"><label>Nome do Cliente:</label><input type="text" name="nome" required></div>
-            <div class="gr-in"><label>WhatsApp (Com DDD):</label><input type="text" name="whatsapp" placeholder="Ex: 71991039981" required></div>
-            <div class="gr-in"><label>Valor Devido (R$):</label><input type="text" name="valor" placeholder="Ex: 150.00" required></div>
-            <div class="gr-in"><label>Texto Pix (Editável):</label><textarea name="texto" required>{{ texto_atual }}</textarea></div>
-            <button type="submit" class="btn">🟢 Registrar Lançamento</button></form>
-        <div class="lista">
-            <div class="lt">📋 Fila de Cobranças Ativas</div>
-            {% if vendas %}
-                {% for v in vendas[::-1] %}
-                <div class="item">
-                    <div>
-                        <h2>{{ v.nome }}</h2>
-                        <p>R$ {{ "%.2f"|format(v.valor) }} | Por: {{ v.criado_por }}</p>
-                        {% if v.status == 'Pendente' %}
-                        <div class="bt-v">
-                            <!-- 🔥 O REDIRECIONAMENTO CLASSICO DE VOLTA: Agora abrindo em nova guia, totalmente livre de bloqueios do Chrome! -->
-                            <a href="https://whatsapp.com{{ v.whatsapp }}&text={{ v.link_zap }}" target="_blank" class="mi cb">💸 Cobrar</a>
-                            <a href="/dar-baixa/{{ v.id }}" class="mi bx">🟩 Baixa</a>
-                        </div>
-                        {% endif %}
-                    </div>
-                    <span class="st {% if v.status == 'Pendente' %}pd{% else %}pg{% endif %}">{{ v.status }}</span>
+        <div id="box-gerente" style="display:none; margin-bottom:15px; background:#16161A; padding:10px; border-radius:6px; border:1px solid #323238; text-align:left;">
+            <form action="/salvar-regras" method="POST">
+                {% for r in regras %}
+                <div style="margin-bottom:6px; font-size:12px;">
+                    <span>Até R$ {{ "%.0f"|format(r.max) }}:</span>
+                    <input type="number" name="desc_{{ loop.index0 }}" value="{{ r.desconto }}" style="width:50px; padding:2px;" required>% Máx
                 </div>
                 {% endfor %}
-            {% else %}
-                <p style="font-size:12px;color:#8D8D99;text-align:center;">Fila zerada.</p>
-            {% endif %}
+                <button type="submit" class="btn" style="padding:4px; font-size:11px;">Salvar Regras</button>
+            </form>
+        </div>
+        <form action="/salvar-venda" method="POST">
+            <div class="gr-in"><label>Nome:</label><input type="text" name="nome" id="inome" required></div>
+            <div class="gr-in"><label>CPF (Opcional):</label><input type="text" name="cpf"></div>
+            <div class="gr-in"><label>Valor Bruto (R$):</label><input type="number" step="0.01" name="valor" id="ivalor" oninput="cTrava()" required></div>
+            <div class="s-box">
+                <div style="display:flex; justify-content:space-between;"><span>Desconto: <b id="t-desc">0%</b></span><span>Limite: <b id="t-lim">5%</b></span></div>
+                <input type="range" name="desconto_aplicado" id="islider" min="0" max="5" value="0" oninput="atVal()" style="width:100%;">
+                <div style="display:flex; justify-content:space-between; margin-top:6px; font-weight:bold;"><span>Final: <span id="t-fin" style="color:#00B37E;">R$ 0.00</span></span></div>
+            </div>
+            <button type="submit" class="btn">🟢 Confirmar Venda</button>
+        </form>
+        <div class="lista">
+            <div class="lt"><span>📋 Caixa</span><input type="text" id="ibusca" class="busca" placeholder="🔍 Buscar..." oninput="fLista()"></div>
+            <div id="l-vendas">
+                {% if vendas %}{% for v in vendas[::-1] %}
+                <div class="item-venda item" data-nome="{{ v.nome.lower() }}" data-valor="{{ "%.2f"|format(v.final) }}">
+                    <div style="display:flex; justify-content:space-between;"><strong>{{ v.nome }}</strong><span style="color:#00B37E;">R$ {{ "%.2f"|format(v.final) }}</span></div>
+                    <p style="color:#8D8D99; font-size:11px;">Bruto: R$ {{ "%.2f"|format(v.bruto) }} | Desc: {{ v.desc_dado }}% | CPF: {{ v.cpf }}</p>
+                    <div class="bt-v">
+                        <span onclick="copiar('{{v.nome}}','{{"%.2f"|format(v.bruto)}}','{{v.desc_dado}}','{{"%.2f"|format(v.final)}}')" class="mi" style="border-color:#00B37E; color:#00B37E;">📋 Copiar</span>
+                        <a href="/pdf/{{ v.id }}" target="_blank" class="mi" style="border-color:#FBA94C; color:#FBA94C;">📄 PDF</a>
+                    </div>
+                </div>
+                {% endfor %}{% endif %}
+            </div>
         </div>
     </div>
     <script>
-        let mo="func";
-        function m(x){
-            if(x==="ger"&&mo!=="ger"){
-                let s=prompt("🔑 GESTOR: Senha:");
-                if(s==="{{ senha_chave }}"){
-                    mo="ger";
-                    document.getElementById('bg').classList.add('active');
-                    document.getElementById('bf').classList.remove('active');
-                    document.getElementById('pg').style.display='flex';
-                    document.getElementById('icp').value="Gerente";
-                }else{alert("❌ Incorreta!");}
-            }else if(x==="func"){
-                mo="func";
-                document.getElementById('bf').classList.add('active');
-                document.getElementById('bg').classList.remove('active');
-                document.getElementById('pg').style.display='none';
-                document.getElementById('icp').value="Funcionário";
-            }
+        let mo = "func"; const regras = JSON.parse('{{ regras_json|safe }}');
+        function cTrava() {
+            let v = parseFloat(document.getElementById('ivalor').value) || 0; let lim = 5;
+            for(let r of regras) { if(v >= r.min && v <= r.max) { lim = r.desconto; break; } }
+            let s = document.getElementById('islider'); s.max = lim; if(parseInt(s.value) > lim) s.value = lim;
+            document.getElementById('t-lim').innerText = lim + "%"; atVal();
         }
-        if("{{ status_retorno }}" === "Gerente"){m("ger");}
+        function atVal() {
+            let b = parseFloat(document.getElementById('ivalor').value) || 0; let d = parseInt(document.getElementById('islider').value) || 0;
+            let f = b - (b * (d / 100)); document.getElementById('txt-desc').innerText = d + "%"; document.getElementById('t-fin').innerText = "R$ " + f.toFixed(2);
+        }
+        function m(x){
+            if(x==="ger" && mo!=="ger"){
+                if(prompt("Senha:") === "{{ senha_chave }}"){ mo="ger"; document.getElementById('bg').classList.add('active'); document.getElementById('bf').classList.remove('active'); document.getElementById('box-gerente').style.display='block'; }
+            }else if(x==="func"){ mo="func"; document.getElementById('bf').classList.add('active'); document.getElementById('bg').classList.remove('active'); document.getElementById('box-gerente').style.display='none'; }
+        }
+        function fLista() {
+            let b = document.getElementById('ibusca').value.toLowerCase(); let itens = document.getElementsByClassName('item-venda');
+            for(let i of itens) { i.style.display = (i.getAttribute('data-nome').includes(b) || i.getAttribute('data-valor').includes(b)) ? "block" : "none"; }
+        }
+        function copiar(n,b,d,f) {
+            let t = `Pedido: ${n}\\nOriginal: R$ ${b}\\nDesconto: ${d}%\\nTotal: R$ ${f}\\nPix: {{ pix_loja }}`;
+            navigator.clipboard.writeText(t).then(() => alert("Copiado!"));
+        }
     </script>
+</body>
+</html>"""
+PDF_TEMPLATE = """<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Recibo #{{ ref }}</title>
+    <style>
+        body { background:#09090A; color:#E1E1E6; font-family:sans-serif; padding:20px; display:flex; justify-content:center; }
+        .box { background:#121214; border:2px solid #00B37E; border-radius:8px; width:100%; max-width:400px; padding:20px; text-align:center; }
+        .topo { border-bottom:2px dashed #29292E; padding-bottom:10px; margin-bottom:15px; }
+        .linha { display:flex; justify-content:space-between; margin-bottom:6px; font-size:13px; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <div class="topo"><strong>🏆 {{ loja_nome }}</strong><p style="font-size:10px; color:#8D8D99;">CNPJ: {{ loja_cnpj }}</p></div>
+        <div class="linha"><span>Cliente:</span> <strong>{{ nome }}</strong></div>
+        <div class="linha"><span>CPF:</span> <span>{{ cpf }}</span></div>
+        <div class="linha"><span>Total Líquido:</span> <strong style="color:#00B37E; font-size:16px;">R$ {{ "%.2f"|format(final) }}</strong></div>
+        <div style="margin-top:20px; background:#202024; padding:10px; border-radius:4px; font-size:11px; color:#FBA94C;">📲 PIX PRONTO: R$ {{ "%.2f"|format(final) }}</div>
+    </div>
+    <script>window.print();</script>
 </body>
 </html>"""
 
 @app.route('/')
 def home():
-    return render_template_string(H, vendas=BM["vendas"], total_recuperado=f"{BM['caixa_recuperado']:.2f}", total_pendente=f"{BM['caixa_pendente']:.2f}", senha_chave=SG, status_retorno="Funcionário", texto_atual=BM["msg"])
+    regras_json = json.dumps(DATA["regras"])
+    return render_template_string(H, vendas=DATA["vendas"], regras=DATA["regras"], regras_json=regras_json, senha_chave=SG, pix_loja=DATA["loja"]["pix"])
 
-@app.route('/salvar', methods=['POST'])
-def salvar():
-    nome = request.form.get('nome', '').strip()
-    w_cru = request.form.get('whatsapp', '').strip()
-    criado_por = request.form.get('criado_por', 'Funcionário')
-    texto_mensagem = request.form.get('texto', '').strip()
-    valor_cru = request.form.get('valor', '0')
-    
-    w = w_cru.replace("-", "").replace("(", "").replace(")", "").replace(" ", "").strip()
-    if w.startswith("55"): w = w[2:]
-    if len(w) == 10: w = w[:2] + "9" + w[2:]
-    whatsapp = "55" + w
-    
-    v_limpo = valor_cru.replace("R$", "").replace("$", "").replace(" ", "").replace(",", ".").strip()
-    try: valor = float(v_limpo)
-    except: valor = 0.0
-    
-    BM["msg"] = texto_mensagem
-    msg_final = texto_mensagem.replace("[NOME]", nome).replace("[VALOR]", f"{valor:.2f}")
-    link_zap = urllib.parse.quote(msg_final)
-    
-    nova = {"id": int(time.time()), "nome": nome, "whatsapp": whatsapp, "valor": valor, "criado_por": criado_por, "status": "Pendente", "link_zap": link_zap}
-    BM["vendas"].append(nova)
-    BM["caixa_pendente"] += valor
+@app.route('/salvar-venda', methods=['POST'])
+def salvar_venda():
+    nome, cpf = request.form.get('nome', '').strip(), request.form.get('cpf', '').strip() or "N/I"
+    try: bruto = float(request.form.get('valor', '0').replace(",", "."))
+    except: bruto = 0.0
+    try: desc = int(request.form.get('desconto_aplicado', '0'))
+    except: desc = 0
+    eco = bruto * (desc / 100)
+    final = bruto - eco
+    DATA["vendas"].append({"id": int(time.time()), "nome": nome, "cpf": cpf, "bruto": bruto, "desc_dado": desc, "eco": eco, "final": final, "ref": f"REC-{int(time.time())}"})
     return redirect('/')
 
-@app.route('/dar-baixa/<int:id_venda>')
-def dar_baixa(id_venda):
-    for v in BM["vendas"]:
-        if v["id"] == id_venda and v["status"] == "Pendente":
-            v["status"] = "Pago"
-            BM["caixa_pendente"] -= v["valor"]
-            BM["caixa_recuperado"] += v["valor"]
-            break
+@app.route('/salvar-regras', methods=['POST'])
+def salvar_regras():
+    for i in range(len(DATA["regras"])):
+        try: DATA["regras"][i]["desconto"] = float(request.form.get(f"desc_{i}", "5"))
+        except: pass
     return redirect('/')
+
+@app.route('/pdf/<int:id_venda>')
+def ver_pdf(id_venda):
+    for v in DATA["vendas"]:
+        if v["id"] == id_venda:
+            return render_template_string(PDF_TEMPLATE, loja_nome=DATA["loja"]["nome"], loja_cnpj=DATA["loja"]["cnpj"], nome=v["nome"], cpf=v["cpf"], final=v["final"], ref=v["ref"])
+    return "Não Encontrado", 404
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=False)
